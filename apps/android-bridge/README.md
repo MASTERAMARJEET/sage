@@ -26,14 +26,14 @@ This process:
 ## Run
 
 ```bash
-npm install
-SAGE_BRAIN_BASE_URL="http://127.0.0.1:8787" npm run dev
+bun install
+SAGE_BRAIN_BASE_URL="http://127.0.0.1:8787" bun run dev
 ```
 
 One-shot smoke cycle:
 
 ```bash
-SAGE_BRAIN_BASE_URL="http://127.0.0.1:8787" npm run smoke
+SAGE_BRAIN_BASE_URL="http://127.0.0.1:8787" bun run smoke
 ```
 
 ## Notes

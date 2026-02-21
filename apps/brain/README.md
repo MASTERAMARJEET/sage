@@ -76,21 +76,21 @@ This includes job controls, maintenance cleanup, queue metrics, and job detail r
 ## D1 migrations
 
 - Initial schema lives in `migrations/0001_initial.sql`
-- Apply locally: `npm run d1:migrate:local`
-- Apply remotely: `npm run d1:migrate:remote`
+- Apply locally: `bun run d1:migrate:local`
+- Apply remotely: `bun run d1:migrate:remote`
 
 ## Local development
 
 1. Install dependencies:
-   - `npm install`
+   - `bun install`
 2. Update `wrangler.jsonc` placeholders:
    - `database_id`
    - `kv namespace id`
    - `AI_GATEWAY_ID`
 3. Run:
-   - `npm run dev`
+   - `bun run dev`
 4. Run tests:
-   - `npm run test`
+   - `bun run test`
 
 ## Phase-1 flow walkthrough
 

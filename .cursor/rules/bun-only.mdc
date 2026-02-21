@@ -1,0 +1,26 @@
+---
+alwaysApply: true
+description: Use Bun for all JS/TS dependency and script commands
+---
+
+# Bun-only package manager
+
+Use **Bun only** for JavaScript/TypeScript dependency management and script execution. Do not suggest or use `npm`, `npx`, `yarn`, or `pnpm` for installs, scripts, or documentation.
+
+## Commands
+
+- **Install dependencies**: `bun install` (run from the app directory, e.g. `apps/brain`, or repo root as appropriate).
+- **Add dependency**: `bun add <pkg>`; dev dependency: `bun add -d <pkg>`.
+- **Run scripts**: `bun run <script>` (e.g. `bun run dev`, `bun run test`). Shorthand `bun <script>` where it applies (e.g. `bun test`).
+- **Run a package binary once**: `bunx <pkg>` (replacement for `npx`).
+
+## Documentation and comments
+
+In READMEs, CONTRIBUTING, or inline comments, always write `bun install`, `bun run ...`, `bun add`, `bunx`. Never reference npm, npx, yarn, or pnpm.
+
+## Examples
+
+- **Good**: `bun install`, `SAGE_BRAIN_BASE_URL="http://127.0.0.1:8787" bun run dev`, `bun add -d vitest`
+- **Avoid**: `npm install`, `npm run dev`, `npx wrangler deploy`
+
+Note: Python uses `.venv`; Bun is for Node/JS/TS only.
