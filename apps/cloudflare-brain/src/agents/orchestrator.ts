@@ -2,10 +2,15 @@ import { Agent } from "agents";
 import {
   completeExecutionJob,
   ensureAppDbSchema,
+  getExecutionQueueSummary,
+  getExecutionJobById,
   insertExecutionJobResult,
   insertApprovalRecord,
   insertExecutionJob,
   insertPolicyDecisionRecord,
+  listExecutionJobsByDevice,
+  listExecutionJobsBySession,
+  listPendingApprovals,
   pullPendingExecutionJobs,
   resolveApprovalRecord,
   updateDeviceHeartbeat,
@@ -57,6 +62,15 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
 
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const path = url.pathname;
+
+    if (request.method === "GET" && path.includes("/jobs/")) {
+      const result = await this.handleJobQuery(path, url.searchParams);
+      if (result) {
+        return result;
+      }
+    }
+
     if (request.method === "POST" && url.pathname.endsWith("/message")) {
       const input = (await request.json()) as { sessionId: string; content: string };
       const result = await this.sendUserMessage(input);
@@ -175,6 +189,77 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     }
 
     return new Response("Not found", { status: 404 });
+  }
+
+  private async handleJobQuery(
+    path: string,
+    searchParams: URLSearchParams
+  ): Promise<Response | null> {
+    if (path.endsWith("/approvals/pending")) {
+      const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10) || 20, 100);
+      const sessionId = searchParams.get("sessionId") ?? undefined;
+      const approvals = await listPendingApprovals(this.env.APP_DB, { limit, sessionId });
+      return Response.json({
+        ok: true,
+        approvals: approvals.map((approval) => ({
+          approvalId: approval.approval_id,
+          intentId: approval.intent_id,
+          sessionId: approval.session_id,
+          summary: approval.summary,
+          createdAt: approval.created_at,
+          expiresAt: approval.expires_at
+        }))
+      });
+    }
+
+    if (path.endsWith("/metrics/queue")) {
+      const deviceId = searchParams.get("deviceId") ?? undefined;
+      const summary = await getExecutionQueueSummary(this.env.APP_DB, { deviceId });
+      return Response.json({
+        ok: true,
+        metrics: {
+          deviceId: deviceId ?? null,
+          byStatus: summary
+        }
+      });
+    }
+
+    const jobPathMatch = path.match(/\/jobs\/([^/]+)$/);
+    if (jobPathMatch) {
+      const jobId = decodeURIComponent(jobPathMatch[1]);
+      const job = await getExecutionJobById(this.env.APP_DB, jobId);
+      if (!job) {
+        return Response.json({ ok: false, reason: "Job not found" }, { status: 404 });
+      }
+      return Response.json({
+        ok: true,
+        job: this.serializeJobRow(job)
+      });
+    }
+
+    const sessionJobsMatch = path.match(/\/sessions\/([^/]+)\/jobs$/);
+    if (sessionJobsMatch) {
+      const sessionId = decodeURIComponent(sessionJobsMatch[1]);
+      const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10) || 20, 100);
+      const jobs = await listExecutionJobsBySession(this.env.APP_DB, { sessionId, limit });
+      return Response.json({
+        ok: true,
+        jobs: jobs.map((job) => this.serializeJobRow(job))
+      });
+    }
+
+    const deviceJobsMatch = path.match(/\/devices\/([^/]+)\/jobs$/);
+    if (deviceJobsMatch) {
+      const deviceId = decodeURIComponent(deviceJobsMatch[1]);
+      const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10) || 20, 100);
+      const jobs = await listExecutionJobsByDevice(this.env.APP_DB, { deviceId, limit });
+      return Response.json({
+        ok: true,
+        jobs: jobs.map((job) => this.serializeJobRow(job))
+      });
+    }
+
+    return null;
   }
 
   async sendUserMessage(input: { sessionId: string; content: string }): Promise<{ reply: string }> {
@@ -712,6 +797,38 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     );
 
     return { ok: true };
+  }
+
+  private serializeJobRow(job: {
+    job_id: string;
+    intent_id: string;
+    session_id: string;
+    device_id: string;
+    payload_json: string;
+    status: string;
+    created_at: string;
+    dispatched_at: string | null;
+    lease_expires_at: string | null;
+    attempt_count: number;
+    completed_at: string | null;
+    output_ref: string | null;
+    error: string | null;
+  }): Record<string, unknown> {
+    return {
+      jobId: job.job_id,
+      intentId: job.intent_id,
+      sessionId: job.session_id,
+      deviceId: job.device_id,
+      payload: JSON.parse(job.payload_json),
+      status: job.status,
+      createdAt: job.created_at,
+      dispatchedAt: job.dispatched_at,
+      leaseExpiresAt: job.lease_expires_at,
+      attemptCount: job.attempt_count,
+      completedAt: job.completed_at,
+      outputRef: job.output_ref,
+      error: job.error
+    };
   }
 
   private deriveTrustTier(attestation: string): "trusted" | "restricted" | "quarantined" {

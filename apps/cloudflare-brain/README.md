@@ -24,6 +24,11 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - `POST /agents/sage-agent/:instance/bridge/heartbeat`
 - `POST /agents/sage-agent/:instance/bridge/jobs/pull`
 - `POST /agents/sage-agent/:instance/bridge/jobs/result`
+- `GET /agents/sage-agent/:instance/jobs/:jobId`
+- `GET /agents/sage-agent/:instance/sessions/:sessionId/jobs?limit=20`
+- `GET /agents/sage-agent/:instance/devices/:deviceId/jobs?limit=20`
+- `GET /agents/sage-agent/:instance/approvals/pending?limit=20&sessionId=<id>`
+- `GET /agents/sage-agent/:instance/metrics/queue?deviceId=<id>`
 - `GET /agents/sage-agent/:instance/state`
 
 ## Current policy baseline

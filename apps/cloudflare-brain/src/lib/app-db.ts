@@ -393,3 +393,151 @@ export async function completeExecutionJob(
 
   return (result.meta.changes ?? 0) > 0 ? "updated" : "not_found";
 }
+
+export async function getExecutionJobById(
+  db: D1Database,
+  jobId: string
+): Promise<ExecutionJobRow | null> {
+  const row = await db
+    .prepare(`SELECT * FROM execution_jobs WHERE job_id = ?`)
+    .bind(jobId)
+    .first<ExecutionJobRow>();
+
+  return row ?? null;
+}
+
+export async function listExecutionJobsBySession(
+  db: D1Database,
+  input: { sessionId: string; limit: number }
+): Promise<ExecutionJobRow[]> {
+  const result = await db
+    .prepare(
+      `
+      SELECT *
+      FROM execution_jobs
+      WHERE session_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+      `
+    )
+    .bind(input.sessionId, input.limit)
+    .all<ExecutionJobRow>();
+
+  return result.results ?? [];
+}
+
+export async function listExecutionJobsByDevice(
+  db: D1Database,
+  input: { deviceId: string; limit: number }
+): Promise<ExecutionJobRow[]> {
+  const result = await db
+    .prepare(
+      `
+      SELECT *
+      FROM execution_jobs
+      WHERE device_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+      `
+    )
+    .bind(input.deviceId, input.limit)
+    .all<ExecutionJobRow>();
+
+  return result.results ?? [];
+}
+
+export async function listPendingApprovals(
+  db: D1Database,
+  input: { limit: number; sessionId?: string }
+): Promise<
+  Array<{
+    approval_id: string;
+    intent_id: string;
+    session_id: string;
+    summary: string;
+    created_at: string;
+    expires_at: string;
+  }>
+> {
+  if (input.sessionId) {
+    const result = await db
+      .prepare(
+        `
+        SELECT approval_id, intent_id, session_id, summary, created_at, expires_at
+        FROM approvals
+        WHERE status = 'pending' AND session_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        `
+      )
+      .bind(input.sessionId, input.limit)
+      .all<{
+        approval_id: string;
+        intent_id: string;
+        session_id: string;
+        summary: string;
+        created_at: string;
+        expires_at: string;
+      }>();
+    return result.results ?? [];
+  }
+
+  const result = await db
+    .prepare(
+      `
+      SELECT approval_id, intent_id, session_id, summary, created_at, expires_at
+      FROM approvals
+      WHERE status = 'pending'
+      ORDER BY created_at DESC
+      LIMIT ?
+      `
+    )
+    .bind(input.limit)
+    .all<{
+      approval_id: string;
+      intent_id: string;
+      session_id: string;
+      summary: string;
+      created_at: string;
+      expires_at: string;
+    }>();
+
+  return result.results ?? [];
+}
+
+export async function getExecutionQueueSummary(
+  db: D1Database,
+  input: { deviceId?: string }
+): Promise<
+  Array<{
+    status: string;
+    total: number;
+  }>
+> {
+  if (input.deviceId) {
+    const result = await db
+      .prepare(
+        `
+        SELECT status, COUNT(*) as total
+        FROM execution_jobs
+        WHERE device_id = ?
+        GROUP BY status
+        `
+      )
+      .bind(input.deviceId)
+      .all<{ status: string; total: number }>();
+    return result.results ?? [];
+  }
+
+  const result = await db
+    .prepare(
+      `
+      SELECT status, COUNT(*) as total
+      FROM execution_jobs
+      GROUP BY status
+      `
+    )
+    .all<{ status: string; total: number }>();
+
+  return result.results ?? [];
+}
