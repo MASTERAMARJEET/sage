@@ -95,3 +95,4 @@ This includes job controls, maintenance cleanup, queue metrics, and job detail r
 
 - This is intentionally a Stage 0/1 foundation and does not yet include full policy/approval workflow execution.
 - LLM requests are designed to route through AI Gateway from day one.
+- Companion bridge scaffolds live at `apps/mac-bridge` and `apps/android-bridge`.
