@@ -30,6 +30,7 @@ export const approvalRequestSchema = z.object({
   intentId: z.string().min(1),
   sessionId: z.string().min(1),
   summary: z.string().min(1),
+  approvalToken: z.string().min(1),
   expiresAt: z.string().datetime(),
   createdAt: z.string().datetime()
 });
@@ -37,12 +38,34 @@ export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const approvalResolutionSchema = z.object({
   approvalId: z.string().min(1),
+  approvalToken: z.string().min(1),
+  nonce: z.string().min(8),
   approved: z.boolean(),
   reason: z.string().optional(),
   resolvedBy: z.string().min(1),
   resolvedAt: z.string().datetime()
 });
 export type ApprovalResolution = z.infer<typeof approvalResolutionSchema>;
+
+export const deviceTrustTierSchema = z.enum(["trusted", "restricted", "quarantined"]);
+export type DeviceTrustTier = z.infer<typeof deviceTrustTierSchema>;
+
+export const bridgeRegistrationSchema = z.object({
+  deviceId: z.string().min(1),
+  platform: z.enum(["macos", "android"]),
+  publicKey: z.string().min(16),
+  attestation: z.string().min(1),
+  nonce: z.string().min(8),
+  requestedAt: z.string().datetime()
+});
+export type BridgeRegistration = z.infer<typeof bridgeRegistrationSchema>;
+
+export const bridgeHeartbeatSchema = z.object({
+  deviceId: z.string().min(1),
+  nonce: z.string().min(8),
+  sentAt: z.string().datetime()
+});
+export type BridgeHeartbeat = z.infer<typeof bridgeHeartbeatSchema>;
 
 export const executionReceiptSchema = z.object({
   id: z.string().min(1),

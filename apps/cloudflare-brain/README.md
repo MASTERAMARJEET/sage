@@ -19,6 +19,8 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - `POST /agents/sage-agent/:instance/message`
 - `POST /agents/sage-agent/:instance/tool-intent`
 - `POST /agents/sage-agent/:instance/approval/resolve`
+- `POST /agents/sage-agent/:instance/bridge/register`
+- `POST /agents/sage-agent/:instance/bridge/heartbeat`
 - `GET /agents/sage-agent/:instance/state`
 
 ## Current policy baseline
@@ -26,6 +28,19 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - Deny-by-default for unknown actions
 - Auto-allow low-risk actions (`read`, `list`, `status`)
 - Require approval for high-risk actions (`write`, `delete`, `exec`, `publish`)
+- Approval resolution requires a single-use approval token plus replay-safe nonce
+
+## Bridge trust tiers
+
+- `trusted`: verified attestation placeholder path
+- `restricted`: usable, but should be blocked from highest-risk actions by policy
+- `quarantined`: registered but should not execute privileged actions
+
+## D1 migrations
+
+- Initial schema lives in `migrations/0001_initial.sql`
+- Apply locally: `npm run d1:migrate:local`
+- Apply remotely: `npm run d1:migrate:remote`
 
 ## Local development
 
