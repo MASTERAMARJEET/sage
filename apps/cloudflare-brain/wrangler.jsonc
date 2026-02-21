@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sage-brain",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-21",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SageAgent",
+        "class_name": "SageAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SageAgent"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "APP_DB",
+      "database_name": "sage-brain-db",
+      "database_id": "REPLACE_WITH_REAL_DB_ID"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "APP_KV",
+      "id": "REPLACE_WITH_REAL_KV_ID"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APP_AUDIT_BUCKET",
+      "bucket_name": "sage-brain-audit"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "AI_GATEWAY_ID": "REPLACE_WITH_GATEWAY_ID",
+    "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
+    "APP_ENV": "dev"
+  }
+}
