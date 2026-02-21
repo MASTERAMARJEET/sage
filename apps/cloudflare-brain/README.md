@@ -29,6 +29,10 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - Auto-allow low-risk actions (`read`, `list`, `status`)
 - Require approval for high-risk actions (`write`, `delete`, `exec`, `publish`)
 - Approval resolution requires a single-use approval token plus replay-safe nonce
+- Trust-tier gates run before policy checks:
+  - `trusted`: full action surface, then policy gating
+  - `restricted`: blocks `exec`, `publish`, and `delete`
+  - `quarantined`: only allows `read`, `list`, `status`
 
 ## Bridge trust tiers
 
@@ -52,6 +56,8 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
    - `AI_GATEWAY_ID`
 3. Run:
    - `npm run dev`
+4. Run tests:
+   - `npm run test`
 
 ## Notes
 

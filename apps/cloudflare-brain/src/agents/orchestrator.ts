@@ -9,6 +9,12 @@ import {
 } from "../lib/app-db";
 import { runChatViaAiGateway } from "../lib/ai-gateway";
 import { ensureSqlSchema, insertAuditEvent, insertSessionMessage } from "../lib/db";
+import {
+  ensureBridgeRegistered,
+  evaluateTrustTierAuthorization,
+  isReplayNonceAllowed,
+  validateApprovalResolutionState
+} from "../lib/guardrails";
 import { evaluateToolIntentPolicy } from "../lib/policy";
 import type { AppEnv } from "../types/env";
 import {
@@ -181,6 +187,38 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
       return { accepted: false, reason: "Invalid tool intent payload" };
     }
 
+    const bridge = await this.env.APP_KV.get(`bridge:${parsed.data.actorDeviceId}`, "json");
+    const bridgeCheck = ensureBridgeRegistered(bridge);
+    if (!bridgeCheck.ok) {
+      return { accepted: false, reason: bridgeCheck.reason };
+    }
+
+    const bridgeRecord = bridge as Record<string, unknown>;
+    const trustTier = deviceTrustTierSchema.safeParse(bridgeRecord.trustTier);
+    if (!trustTier.success) {
+      return { accepted: false, reason: "Bridge trust tier is missing or invalid" };
+    }
+
+    const trustDecision = evaluateTrustTierAuthorization({
+      trustTier: trustTier.data,
+      action: parsed.data.action
+    });
+    if (!trustDecision.allowed) {
+      await this.persistAudit(
+        parsed.data.sessionId,
+        "policy_decided",
+        {
+          intentId: parsed.data.id,
+          allow: false,
+          requiresApproval: false,
+          riskTier: "critical",
+          reason: trustDecision.reason
+        },
+        parsed.data.id
+      );
+      return { accepted: false, reason: trustDecision.reason };
+    }
+
     const decision = evaluateToolIntentPolicy(parsed.data);
 
     await insertPolicyDecisionRecord(this.env.APP_DB, {
@@ -299,12 +337,13 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     }
 
     const pending = existing as Record<string, unknown>;
-    if (pending.status !== "pending") {
-      return { ok: false, reason: "Approval is already resolved" };
-    }
-
-    if (pending.approvalToken !== input.approvalToken) {
-      return { ok: false, reason: "Invalid approval token" };
+    const resolutionCheck = validateApprovalResolutionState({
+      pending,
+      approvalToken: input.approvalToken,
+      now: new Date()
+    });
+    if (!resolutionCheck.ok) {
+      return { ok: false, reason: resolutionCheck.reason };
     }
 
     const updated = {
@@ -406,8 +445,9 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
 
     const kvKey = `bridge:${input.deviceId}`;
     const existing = await this.env.APP_KV.get(kvKey, "json");
-    if (!existing || typeof existing !== "object") {
-      return { ok: false, reason: "Bridge is not registered" };
+    const bridgeCheck = ensureBridgeRegistered(existing);
+    if (!bridgeCheck.ok) {
+      return { ok: false, reason: bridgeCheck.reason };
     }
 
     const bridge = existing as Record<string, unknown>;
@@ -441,7 +481,7 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
   private async consumeReplayNonce(nonce: string, ttlSeconds: number): Promise<boolean> {
     const nonceKey = `nonce:${nonce}`;
     const existing = await this.env.APP_KV.get(nonceKey);
-    if (existing) {
+    if (!isReplayNonceAllowed(existing)) {
       return false;
     }
 
