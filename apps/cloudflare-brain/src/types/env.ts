@@ -23,4 +23,5 @@ export type AppEnv = {
   AI_GATEWAY_ID: string;
   AI_MODEL: string;
   APP_ENV: string;
+  OPERATOR_TOKEN?: string;
 };

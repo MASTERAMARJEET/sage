@@ -1,5 +1,7 @@
 import { Agent } from "agents";
 import {
+  expirePendingApprovals,
+  cancelExecutionJob,
   completeExecutionJob,
   ensureAppDbSchema,
   getExecutionQueueSummary,
@@ -9,9 +11,12 @@ import {
   insertExecutionJob,
   insertPolicyDecisionRecord,
   listExecutionJobsByDevice,
+  listDevices,
   listExecutionJobsBySession,
   listPendingApprovals,
   pullPendingExecutionJobs,
+  purgeOldExecutionArtifacts,
+  requeueExecutionJob,
   resolveApprovalRecord,
   updateDeviceHeartbeat,
   upsertDeviceRecord
@@ -33,6 +38,8 @@ import {
   bridgeJobPullRequestSchema,
   bridgeJobResultSchema,
   dispatchAuthorizationRequestSchema,
+  jobControlRequestSchema,
+  maintenanceCleanupRequestSchema,
   bridgeHeartbeatSchema,
   bridgeRegistrationSchema,
   deviceTrustTierSchema,
@@ -64,8 +71,8 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (request.method === "GET" && path.includes("/jobs/")) {
-      const result = await this.handleJobQuery(path, url.searchParams);
+    if (request.method === "GET") {
+      const result = await this.handleJobQuery(request, path, url.searchParams);
       if (result) {
         return result;
       }
@@ -184,6 +191,47 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
       return Response.json(result);
     }
 
+    if (request.method === "POST" && /\/jobs\/[^/]+\/cancel$/.test(url.pathname)) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
+      const input = await request.json();
+      const parsed = jobControlRequestSchema.safeParse(input);
+      if (!parsed.success) {
+        return Response.json({ ok: false, reason: "Invalid cancel job payload" }, { status: 400 });
+      }
+      const jobId = decodeURIComponent(url.pathname.split("/").at(-2) ?? "");
+      const result = await this.cancelJob(jobId, parsed.data);
+      return Response.json(result);
+    }
+
+    if (request.method === "POST" && /\/jobs\/[^/]+\/requeue$/.test(url.pathname)) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
+      const input = await request.json();
+      const parsed = jobControlRequestSchema.safeParse(input);
+      if (!parsed.success) {
+        return Response.json({ ok: false, reason: "Invalid requeue job payload" }, { status: 400 });
+      }
+      const jobId = decodeURIComponent(url.pathname.split("/").at(-2) ?? "");
+      const result = await this.requeueJob(jobId, parsed.data);
+      return Response.json(result);
+    }
+
+    if (request.method === "POST" && url.pathname.endsWith("/maintenance/cleanup")) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
+      const input = await request.json();
+      const parsed = maintenanceCleanupRequestSchema.safeParse(input);
+      if (!parsed.success) {
+        return Response.json({ ok: false, reason: "Invalid cleanup payload" }, { status: 400 });
+      }
+      const result = await this.runMaintenanceCleanup(parsed.data);
+      return Response.json(result);
+    }
+
     if (request.method === "GET" && url.pathname.endsWith("/state")) {
       return Response.json(this.state);
     }
@@ -192,10 +240,14 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
   }
 
   private async handleJobQuery(
+    request: Request,
     path: string,
     searchParams: URLSearchParams
   ): Promise<Response | null> {
     if (path.endsWith("/approvals/pending")) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
       const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10) || 20, 100);
       const sessionId = searchParams.get("sessionId") ?? undefined;
       const approvals = await listPendingApprovals(this.env.APP_DB, { limit, sessionId });
@@ -213,6 +265,9 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     }
 
     if (path.endsWith("/metrics/queue")) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
       const deviceId = searchParams.get("deviceId") ?? undefined;
       const summary = await getExecutionQueueSummary(this.env.APP_DB, { deviceId });
       return Response.json({
@@ -224,8 +279,35 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
       });
     }
 
+    if (path.endsWith("/bridges")) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
+      const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "50", 10) || 50, 200);
+      const platformParam = searchParams.get("platform");
+      const trustTierParam = searchParams.get("trustTier");
+      const platform =
+        platformParam === "macos" || platformParam === "android" ? platformParam : undefined;
+      const trustTierParsed = deviceTrustTierSchema.safeParse(trustTierParam);
+      const trustTier = trustTierParsed.success ? trustTierParsed.data : undefined;
+      const bridges = await listDevices(this.env.APP_DB, { limit, platform, trustTier });
+      return Response.json({
+        ok: true,
+        bridges: bridges.map((bridge) => ({
+          deviceId: bridge.device_id,
+          platform: bridge.platform,
+          trustTier: bridge.trust_tier,
+          enrolledAt: bridge.enrolled_at,
+          lastSeenAt: bridge.last_seen_at
+        }))
+      });
+    }
+
     const jobPathMatch = path.match(/\/jobs\/([^/]+)$/);
     if (jobPathMatch) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
       const jobId = decodeURIComponent(jobPathMatch[1]);
       const job = await getExecutionJobById(this.env.APP_DB, jobId);
       if (!job) {
@@ -239,6 +321,9 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
 
     const sessionJobsMatch = path.match(/\/sessions\/([^/]+)\/jobs$/);
     if (sessionJobsMatch) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
       const sessionId = decodeURIComponent(sessionJobsMatch[1]);
       const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10) || 20, 100);
       const jobs = await listExecutionJobsBySession(this.env.APP_DB, { sessionId, limit });
@@ -250,6 +335,9 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
 
     const deviceJobsMatch = path.match(/\/devices\/([^/]+)\/jobs$/);
     if (deviceJobsMatch) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
       const deviceId = decodeURIComponent(deviceJobsMatch[1]);
       const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "20", 10) || 20, 100);
       const jobs = await listExecutionJobsByDevice(this.env.APP_DB, { deviceId, limit });
@@ -813,6 +901,7 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     completed_at: string | null;
     output_ref: string | null;
     error: string | null;
+    transition_reason: string | null;
   }): Record<string, unknown> {
     return {
       jobId: job.job_id,
@@ -827,7 +916,115 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
       attemptCount: job.attempt_count,
       completedAt: job.completed_at,
       outputRef: job.output_ref,
-      error: job.error
+      error: job.error,
+      transitionReason: job.transition_reason
+    };
+  }
+
+  private async cancelJob(
+    jobId: string,
+    input: { nonce: string; actorId: string; reason: string; requestedAt: string }
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!(await this.consumeReplayNonce(input.nonce, 60))) {
+      return { ok: false, reason: "Replay-protection nonce already used" };
+    }
+
+    const result = await cancelExecutionJob(this.env.APP_DB, {
+      jobId,
+      reason: `[${input.actorId}] ${input.reason}`,
+      cancelledAt: input.requestedAt
+    });
+
+    if (result === "not_found") {
+      return { ok: false, reason: "Job not found" };
+    }
+    if (result === "already_final") {
+      return { ok: true };
+    }
+
+    await this.persistAudit(
+      "bridge-control",
+      "execution_control",
+      {
+        action: "cancel",
+        actorId: input.actorId,
+        jobId,
+        reason: input.reason
+      },
+      jobId
+    );
+
+    return { ok: true };
+  }
+
+  private async requeueJob(
+    jobId: string,
+    input: { nonce: string; actorId: string; reason: string; requestedAt: string }
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!(await this.consumeReplayNonce(input.nonce, 60))) {
+      return { ok: false, reason: "Replay-protection nonce already used" };
+    }
+
+    const result = await requeueExecutionJob(this.env.APP_DB, {
+      jobId,
+      reason: `[${input.actorId}] ${input.reason}`
+    });
+
+    if (result === "not_found") {
+      return { ok: false, reason: "Job not found" };
+    }
+
+    await this.persistAudit(
+      "bridge-control",
+      "execution_control",
+      {
+        action: "requeue",
+        actorId: input.actorId,
+        jobId,
+        reason: input.reason
+      },
+      jobId
+    );
+
+    return { ok: true };
+  }
+
+  private async runMaintenanceCleanup(input: {
+    nonce: string;
+    actorId: string;
+    requestedAt: string;
+    retainDays?: number;
+  }): Promise<{ ok: boolean; reason?: string; expiredApprovals?: number; jobsDeleted?: number; resultsDeleted?: number }> {
+    if (!(await this.consumeReplayNonce(input.nonce, 60))) {
+      return { ok: false, reason: "Replay-protection nonce already used" };
+    }
+
+    const nowIso = input.requestedAt;
+    const retainDays = input.retainDays ?? 30;
+    const cutoffIso = new Date(new Date(nowIso).getTime() - retainDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const expiredApprovals = await expirePendingApprovals(this.env.APP_DB, nowIso);
+    const purged = await purgeOldExecutionArtifacts(this.env.APP_DB, cutoffIso);
+
+    await this.persistAudit(
+      "bridge-control",
+      "execution_control",
+      {
+        action: "maintenance_cleanup",
+        actorId: input.actorId,
+        retainDays,
+        expiredApprovals,
+        jobsDeleted: purged.jobsDeleted,
+        resultsDeleted: purged.resultsDeleted
+      },
+      `maintenance-${nowIso}`
+    );
+
+    return {
+      ok: true,
+      expiredApprovals,
+      jobsDeleted: purged.jobsDeleted,
+      resultsDeleted: purged.resultsDeleted
     };
   }
 
@@ -853,6 +1050,26 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
 
     await this.env.APP_KV.put(nonceKey, "1", { expirationTtl: ttlSeconds });
     return true;
+  }
+
+  private async isOperatorAuthorized(request: Request): Promise<boolean> {
+    const configured = this.env.OPERATOR_TOKEN?.trim();
+    if (!configured) {
+      return true;
+    }
+
+    const provided = request.headers.get("x-sage-operator-token") ?? "";
+    const configuredBytes = new TextEncoder().encode(configured);
+    const providedBytes = new TextEncoder().encode(provided);
+    if (configuredBytes.length !== providedBytes.length) {
+      return false;
+    }
+
+    let diff = 0;
+    for (let i = 0; i < configuredBytes.length; i += 1) {
+      diff |= configuredBytes[i] ^ providedBytes[i];
+    }
+    return diff === 0;
   }
 
   private async persistAudit(

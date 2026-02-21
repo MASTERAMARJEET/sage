@@ -50,7 +50,8 @@ export async function ensureAppDbSchema(db: D1Database): Promise<void> {
       attempt_count INTEGER NOT NULL DEFAULT 0,
       completed_at TEXT,
       output_ref TEXT,
-      error TEXT
+      error TEXT,
+      transition_reason TEXT
     );
 
     CREATE TABLE IF NOT EXISTS execution_job_results (
@@ -79,6 +80,17 @@ export type ExecutionJobRow = {
   completed_at: string | null;
   output_ref: string | null;
   error: string | null;
+  transition_reason: string | null;
+};
+
+export type DeviceRow = {
+  device_id: string;
+  platform: "macos" | "android";
+  trust_tier: DeviceTrustTier;
+  public_key: string;
+  attestation: string;
+  enrolled_at: string;
+  last_seen_at: string;
 };
 
 export async function upsertDeviceRecord(
@@ -240,8 +252,8 @@ export async function insertExecutionJob(
     .prepare(
       `
       INSERT INTO execution_jobs (
-        job_id, intent_id, session_id, device_id, payload_json, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        job_id, intent_id, session_id, device_id, payload_json, status, created_at, transition_reason
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, 'initial queue')
       `
     )
     .bind(
@@ -268,7 +280,7 @@ export async function pullPendingExecutionJobs(
     .prepare(
       `
       UPDATE execution_jobs
-      SET status = 'pending', dispatched_at = NULL, lease_expires_at = NULL
+      SET status = 'pending', dispatched_at = NULL, lease_expires_at = NULL, transition_reason = 'lease expired requeue'
       WHERE device_id = ? AND status = 'dispatched' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
       `
     )
@@ -298,7 +310,7 @@ export async function pullPendingExecutionJobs(
       .prepare(
         `
         UPDATE execution_jobs
-        SET status = 'dispatched', dispatched_at = ?, lease_expires_at = ?, attempt_count = attempt_count + 1
+        SET status = 'dispatched', dispatched_at = ?, lease_expires_at = ?, attempt_count = attempt_count + 1, transition_reason = 'bridge pull dispatch'
         WHERE job_id = ? AND status = 'pending'
         `
       )
@@ -377,7 +389,7 @@ export async function completeExecutionJob(
     .prepare(
       `
       UPDATE execution_jobs
-      SET status = ?, completed_at = ?, output_ref = ?, error = ?, lease_expires_at = NULL
+      SET status = ?, completed_at = ?, output_ref = ?, error = ?, lease_expires_at = NULL, transition_reason = ?
       WHERE job_id = ? AND device_id = ? AND status IN ('pending', 'dispatched')
       `
     )
@@ -386,9 +398,89 @@ export async function completeExecutionJob(
       input.completedAt,
       input.outputRef ?? null,
       input.error ?? null,
+      input.error ?? input.status,
       input.jobId,
       input.deviceId
     )
+    .run();
+
+  return (result.meta.changes ?? 0) > 0 ? "updated" : "not_found";
+}
+
+export async function requeueExecutionJob(
+  db: D1Database,
+  input: {
+    jobId: string;
+    reason: string;
+  }
+): Promise<"updated" | "already_pending" | "not_found"> {
+  const lookup = await db
+    .prepare(`SELECT status FROM execution_jobs WHERE job_id = ?`)
+    .bind(input.jobId)
+    .first<{ status: string }>();
+
+  if (!lookup) {
+    return "not_found";
+  }
+
+  if (lookup.status === "pending") {
+    return "already_pending";
+  }
+
+  const result = await db
+    .prepare(
+      `
+      UPDATE execution_jobs
+      SET status = 'pending',
+          dispatched_at = NULL,
+          lease_expires_at = NULL,
+          completed_at = NULL,
+          output_ref = NULL,
+          error = NULL,
+          transition_reason = ?
+      WHERE job_id = ?
+      `
+    )
+    .bind(input.reason, input.jobId)
+    .run();
+
+  return (result.meta.changes ?? 0) > 0 ? "updated" : "not_found";
+}
+
+export async function cancelExecutionJob(
+  db: D1Database,
+  input: {
+    jobId: string;
+    reason: string;
+    cancelledAt: string;
+  }
+): Promise<"updated" | "already_final" | "not_found"> {
+  const lookup = await db
+    .prepare(`SELECT status FROM execution_jobs WHERE job_id = ?`)
+    .bind(input.jobId)
+    .first<{ status: string }>();
+
+  if (!lookup) {
+    return "not_found";
+  }
+
+  if (lookup.status === "completed" || lookup.status === "failed" || lookup.status === "rejected") {
+    return "already_final";
+  }
+
+  const result = await db
+    .prepare(
+      `
+      UPDATE execution_jobs
+      SET status = 'rejected',
+          completed_at = ?,
+          lease_expires_at = NULL,
+          transition_reason = ?,
+          error = COALESCE(error, 'cancelled by operator')
+      WHERE job_id = ?
+      `
+    )
+    .bind(input.cancelledAt, input.reason, input.jobId)
     .run();
 
   return (result.meta.changes ?? 0) > 0 ? "updated" : "not_found";
@@ -443,6 +535,72 @@ export async function listExecutionJobsByDevice(
     .bind(input.deviceId, input.limit)
     .all<ExecutionJobRow>();
 
+  return result.results ?? [];
+}
+
+export async function listDevices(
+  db: D1Database,
+  input: { limit: number; platform?: "macos" | "android"; trustTier?: DeviceTrustTier }
+): Promise<DeviceRow[]> {
+  if (input.platform && input.trustTier) {
+    const result = await db
+      .prepare(
+        `
+        SELECT *
+        FROM devices
+        WHERE platform = ? AND trust_tier = ?
+        ORDER BY last_seen_at DESC
+        LIMIT ?
+        `
+      )
+      .bind(input.platform, input.trustTier, input.limit)
+      .all<DeviceRow>();
+    return result.results ?? [];
+  }
+
+  if (input.platform) {
+    const result = await db
+      .prepare(
+        `
+        SELECT *
+        FROM devices
+        WHERE platform = ?
+        ORDER BY last_seen_at DESC
+        LIMIT ?
+        `
+      )
+      .bind(input.platform, input.limit)
+      .all<DeviceRow>();
+    return result.results ?? [];
+  }
+
+  if (input.trustTier) {
+    const result = await db
+      .prepare(
+        `
+        SELECT *
+        FROM devices
+        WHERE trust_tier = ?
+        ORDER BY last_seen_at DESC
+        LIMIT ?
+        `
+      )
+      .bind(input.trustTier, input.limit)
+      .all<DeviceRow>();
+    return result.results ?? [];
+  }
+
+  const result = await db
+    .prepare(
+      `
+      SELECT *
+      FROM devices
+      ORDER BY last_seen_at DESC
+      LIMIT ?
+      `
+    )
+    .bind(input.limit)
+    .all<DeviceRow>();
   return result.results ?? [];
 }
 
@@ -540,4 +698,55 @@ export async function getExecutionQueueSummary(
     .all<{ status: string; total: number }>();
 
   return result.results ?? [];
+}
+
+export async function expirePendingApprovals(
+  db: D1Database,
+  nowIso: string
+): Promise<number> {
+  const result = await db
+    .prepare(
+      `
+      UPDATE approvals
+      SET status = 'rejected',
+          resolved_by = 'system',
+          resolved_at = ?,
+          resolution_reason = 'expired'
+      WHERE status = 'pending' AND expires_at < ?
+      `
+    )
+    .bind(nowIso, nowIso)
+    .run();
+
+  return result.meta.changes ?? 0;
+}
+
+export async function purgeOldExecutionArtifacts(
+  db: D1Database,
+  cutoffIso: string
+): Promise<{ jobsDeleted: number; resultsDeleted: number }> {
+  const jobs = await db
+    .prepare(
+      `
+      DELETE FROM execution_jobs
+      WHERE status IN ('completed', 'failed', 'rejected') AND completed_at IS NOT NULL AND completed_at < ?
+      `
+    )
+    .bind(cutoffIso)
+    .run();
+
+  const results = await db
+    .prepare(
+      `
+      DELETE FROM execution_job_results
+      WHERE reported_at < ?
+      `
+    )
+    .bind(cutoffIso)
+    .run();
+
+  return {
+    jobsDeleted: jobs.meta.changes ?? 0,
+    resultsDeleted: results.meta.changes ?? 0
+  };
 }

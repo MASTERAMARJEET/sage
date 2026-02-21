@@ -94,6 +94,22 @@ export const bridgeJobResultSchema = z.object({
 });
 export type BridgeJobResult = z.infer<typeof bridgeJobResultSchema>;
 
+export const jobControlRequestSchema = z.object({
+  nonce: z.string().min(8),
+  actorId: z.string().min(1),
+  reason: z.string().min(3),
+  requestedAt: z.string().datetime()
+});
+export type JobControlRequest = z.infer<typeof jobControlRequestSchema>;
+
+export const maintenanceCleanupRequestSchema = z.object({
+  nonce: z.string().min(8),
+  actorId: z.string().min(1),
+  requestedAt: z.string().datetime(),
+  retainDays: z.number().int().positive().max(365).optional()
+});
+export type MaintenanceCleanupRequest = z.infer<typeof maintenanceCleanupRequestSchema>;
+
 export const executionReceiptSchema = z.object({
   id: z.string().min(1),
   intentId: z.string().min(1),
@@ -115,6 +131,7 @@ export const auditEventSchema = z.object({
     "approval_resolved",
     "execution_dispatched",
     "execution_result",
+    "execution_control",
     "llm_invoked"
   ]),
   payload: z.record(z.string(), z.unknown()),

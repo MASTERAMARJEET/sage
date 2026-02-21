@@ -14,6 +14,10 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - `GET /health` - service health
 - `POST/WS /agents/sage-agent/:instance` - Agents SDK route
 
+If `OPERATOR_TOKEN` is set, sensitive queue and monitoring endpoints require
+the `x-sage-operator-token` header.
+This includes job controls, maintenance cleanup, queue metrics, and job detail routes.
+
 ## Agent instance routes
 
 - `POST /agents/sage-agent/:instance/message`
@@ -25,10 +29,14 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - `POST /agents/sage-agent/:instance/bridge/jobs/pull`
 - `POST /agents/sage-agent/:instance/bridge/jobs/result`
 - `GET /agents/sage-agent/:instance/jobs/:jobId`
+- `POST /agents/sage-agent/:instance/jobs/:jobId/cancel`
+- `POST /agents/sage-agent/:instance/jobs/:jobId/requeue`
+- `POST /agents/sage-agent/:instance/maintenance/cleanup`
 - `GET /agents/sage-agent/:instance/sessions/:sessionId/jobs?limit=20`
 - `GET /agents/sage-agent/:instance/devices/:deviceId/jobs?limit=20`
 - `GET /agents/sage-agent/:instance/approvals/pending?limit=20&sessionId=<id>`
 - `GET /agents/sage-agent/:instance/metrics/queue?deviceId=<id>`
+- `GET /agents/sage-agent/:instance/bridges?limit=50&platform=macos|android&trustTier=trusted|restricted|quarantined`
 - `GET /agents/sage-agent/:instance/state`
 
 ## Current policy baseline
@@ -49,6 +57,7 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 - Bridges pull pending jobs and submit completion/failed/rejected results
 - Pulled jobs receive a lease window and stale dispatched jobs are re-queued
 - Job results are idempotent via `resultId` deduplication
+- Job transitions persist operator/system reasons (`transitionReason`) for debugging
 
 ## Bridge trust tiers
 
