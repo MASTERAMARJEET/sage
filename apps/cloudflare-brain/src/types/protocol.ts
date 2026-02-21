@@ -63,7 +63,9 @@ export type BridgeRegistration = z.infer<typeof bridgeRegistrationSchema>;
 export const bridgeHeartbeatSchema = z.object({
   deviceId: z.string().min(1),
   nonce: z.string().min(8),
-  sentAt: z.string().datetime()
+  sentAt: z.string().datetime(),
+  signature: z.string().min(16).optional(),
+  signedAt: z.string().datetime().optional()
 });
 export type BridgeHeartbeat = z.infer<typeof bridgeHeartbeatSchema>;
 
@@ -78,7 +80,9 @@ export const bridgeJobPullRequestSchema = z.object({
   deviceId: z.string().min(1),
   nonce: z.string().min(8),
   requestedAt: z.string().datetime(),
-  limit: z.number().int().positive().max(20).optional()
+  limit: z.number().int().positive().max(20).optional(),
+  signature: z.string().min(16).optional(),
+  signedAt: z.string().datetime().optional()
 });
 export type BridgeJobPullRequest = z.infer<typeof bridgeJobPullRequestSchema>;
 
@@ -90,7 +94,9 @@ export const bridgeJobResultSchema = z.object({
   status: z.enum(["completed", "failed", "rejected"]),
   outputRef: z.string().optional(),
   error: z.string().optional(),
-  reportedAt: z.string().datetime()
+  reportedAt: z.string().datetime(),
+  signature: z.string().min(16).optional(),
+  signedAt: z.string().datetime().optional()
 });
 export type BridgeJobResult = z.infer<typeof bridgeJobResultSchema>;
 

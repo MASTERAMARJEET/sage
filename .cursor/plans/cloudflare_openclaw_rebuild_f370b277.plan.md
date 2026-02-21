@@ -4,22 +4,22 @@ overview: Design and deliver a Cloudflare-native personal agent platform inspire
 todos:
   - id: define-protocols
     content: Define shared schemas and event contracts for tool intents, policy decisions, approvals, and execution receipts.
-    status: pending
+    status: completed
   - id: build-orchestrator
     content: Implement Worker ingress and AgentOrchestrator Durable Object with state persistence in D1/KV/R2, and route all model traffic through AI Gateway.
-    status: pending
+    status: completed
   - id: implement-guardrails
     content: Implement policy engine, approval workflow integration, and deny-by-default enforcement.
-    status: pending
+    status: completed
   - id: build-bridges
     content: Build Mac and Android bridge executors with device trust tiers and scoped local file access.
-    status: pending
+    status: in_progress
   - id: ship-phase1-flow
     content: "Deliver end-to-end Phase-1 workflow: request -> policy -> approval -> local execution -> audited result."
-    status: pending
+    status: in_progress
   - id: ai-gateway-baseline
     content: Configure AI Gateway as mandatory LLM egress with model routing, retries/fallback, and per-session observability.
-    status: pending
+    status: completed
 isProject: false
 ---
 

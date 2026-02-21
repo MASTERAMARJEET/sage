@@ -24,4 +24,5 @@ export type AppEnv = {
   AI_MODEL: string;
   APP_ENV: string;
   OPERATOR_TOKEN?: string;
+  BRIDGE_SIGNATURE_MODE?: "off" | "optional" | "required";
 };

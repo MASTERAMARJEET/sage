@@ -18,6 +18,12 @@ If `OPERATOR_TOKEN` is set, sensitive queue and monitoring endpoints require
 the `x-sage-operator-token` header.
 This includes job controls, maintenance cleanup, queue metrics, and job detail routes.
 
+`BRIDGE_SIGNATURE_MODE` controls bridge-originated request signing:
+
+- `off`: do not verify bridge signatures
+- `optional` (default): verify when `signature` + `signedAt` are present
+- `required`: reject unsigned bridge heartbeat/job pull/job result requests
+
 ## Agent instance routes
 
 - `POST /agents/sage-agent/:instance/message`
@@ -45,6 +51,7 @@ This includes job controls, maintenance cleanup, queue metrics, and job detail r
 - Auto-allow low-risk actions (`read`, `list`, `status`)
 - Require approval for high-risk actions (`write`, `delete`, `exec`, `publish`)
 - Approval resolution requires a single-use approval token plus replay-safe nonce
+- Bridge request signatures (ECDSA P-256 over canonical payload) can be enforced via `BRIDGE_SIGNATURE_MODE`
 - Trust-tier gates run before policy checks:
   - `trusted`: full action surface, then policy gating
   - `restricted`: blocks `exec`, `publish`, and `delete`

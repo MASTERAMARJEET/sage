@@ -5,7 +5,8 @@ import {
   evaluateTrustTierAuthorization,
   isBridgeOnline,
   isReplayNonceAllowed,
-  validateApprovalResolutionState
+  validateApprovalResolutionState,
+  verifyBridgeRequestSignature
 } from "./guardrails";
 
 describe("evaluateTrustTierAuthorization", () => {
@@ -104,3 +105,80 @@ describe("dispatch authorization", () => {
     expect(result.allowed).toBe(false);
   });
 });
+
+describe("bridge signature verification", () => {
+  it("allows unsigned bridge request when signature mode is optional", async () => {
+    const result = await verifyBridgeRequestSignature({
+      mode: "optional",
+      bridgeRecord: { publicKey: "unused-in-optional-mode" },
+      operation: "bridge.heartbeat",
+      payload: {
+        deviceId: "device-1",
+        nonce: "nonce-12345678",
+        sentAt: "2026-02-21T00:00:00.000Z"
+      },
+      now: new Date("2026-02-21T00:00:00.000Z")
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects unsigned bridge request when signature mode is required", async () => {
+    const result = await verifyBridgeRequestSignature({
+      mode: "required",
+      bridgeRecord: { publicKey: "unused-in-required-mode" },
+      operation: "bridge.jobs.pull",
+      payload: {
+        deviceId: "device-1",
+        nonce: "nonce-12345678",
+        requestedAt: "2026-02-21T00:00:00.000Z",
+        limit: 5
+      },
+      now: new Date("2026-02-21T00:00:00.000Z")
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("verifies a valid ECDSA signed bridge request", async () => {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"]
+    );
+
+    const signedAt = "2026-02-21T00:00:00.000Z";
+    const payload = {
+      deviceId: "device-1",
+      nonce: "nonce-12345678",
+      sentAt: "2026-02-21T00:00:00.000Z"
+    };
+    const message = `${"bridge.heartbeat"}\n${signedAt}\n${JSON.stringify(payload)}`;
+    const signatureBuffer = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      keyPair.privateKey,
+      new TextEncoder().encode(message)
+    );
+    const publicKeyBuffer = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+
+    const result = await verifyBridgeRequestSignature({
+      mode: "required",
+      bridgeRecord: {
+        publicKey: toBase64(new Uint8Array(publicKeyBuffer))
+      },
+      operation: "bridge.heartbeat",
+      signedAt,
+      signature: toBase64(new Uint8Array(signatureBuffer)),
+      payload,
+      now: new Date("2026-02-21T00:00:10.000Z")
+    });
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}

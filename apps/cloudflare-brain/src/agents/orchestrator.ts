@@ -29,7 +29,8 @@ import {
   evaluateTrustTierAuthorization,
   isBridgeOnline,
   isReplayNonceAllowed,
-  validateApprovalResolutionState
+  validateApprovalResolutionState,
+  verifyBridgeRequestSignature
 } from "../lib/guardrails";
 import { evaluateToolIntentPolicy } from "../lib/policy";
 import type { AppEnv } from "../types/env";
@@ -670,6 +671,8 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     deviceId: string;
     nonce: string;
     sentAt: string;
+    signature?: string;
+    signedAt?: string;
   }): Promise<{ ok: boolean; reason?: string }> {
     if (!(await this.consumeReplayNonce(input.nonce, 5 * 60))) {
       return { ok: false, reason: "Replay-protection nonce already used" };
@@ -683,6 +686,23 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     }
 
     const bridge = existing as Record<string, unknown>;
+    const signatureCheck = await verifyBridgeRequestSignature({
+      mode: this.env.BRIDGE_SIGNATURE_MODE,
+      bridgeRecord: bridge,
+      operation: "bridge.heartbeat",
+      signedAt: input.signedAt,
+      signature: input.signature,
+      payload: {
+        deviceId: input.deviceId,
+        nonce: input.nonce,
+        sentAt: input.sentAt
+      },
+      now: new Date(input.sentAt)
+    });
+    if (!signatureCheck.ok) {
+      return { ok: false, reason: signatureCheck.reason };
+    }
+
     const updated = {
       ...bridge,
       lastSeenAt: input.sentAt
@@ -789,6 +809,8 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     nonce: string;
     requestedAt: string;
     limit?: number;
+    signature?: string;
+    signedAt?: string;
   }): Promise<{ ok: boolean; reason?: string; jobs?: Array<Record<string, unknown>> }> {
     if (!(await this.consumeReplayNonce(input.nonce, 60))) {
       return { ok: false, reason: "Replay-protection nonce already used" };
@@ -798,6 +820,25 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     const bridgeCheck = ensureBridgeRegistered(bridge);
     if (!bridgeCheck.ok) {
       return { ok: false, reason: bridgeCheck.reason };
+    }
+
+    const bridgeRecord = bridge as Record<string, unknown>;
+    const signatureCheck = await verifyBridgeRequestSignature({
+      mode: this.env.BRIDGE_SIGNATURE_MODE,
+      bridgeRecord,
+      operation: "bridge.jobs.pull",
+      signedAt: input.signedAt,
+      signature: input.signature,
+      payload: {
+        deviceId: input.deviceId,
+        nonce: input.nonce,
+        requestedAt: input.requestedAt,
+        limit: input.limit ?? null
+      },
+      now: new Date(input.requestedAt)
+    });
+    if (!signatureCheck.ok) {
+      return { ok: false, reason: signatureCheck.reason };
     }
 
     const jobs = await pullPendingExecutionJobs(this.env.APP_DB, {
@@ -832,6 +873,8 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     outputRef?: string;
     error?: string;
     reportedAt: string;
+    signature?: string;
+    signedAt?: string;
   }): Promise<{ ok: boolean; reason?: string }> {
     if (!(await this.consumeReplayNonce(input.nonce, 60))) {
       return { ok: false, reason: "Replay-protection nonce already used" };
@@ -841,6 +884,29 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     const bridgeCheck = ensureBridgeRegistered(bridge);
     if (!bridgeCheck.ok) {
       return { ok: false, reason: bridgeCheck.reason };
+    }
+
+    const bridgeRecord = bridge as Record<string, unknown>;
+    const signatureCheck = await verifyBridgeRequestSignature({
+      mode: this.env.BRIDGE_SIGNATURE_MODE,
+      bridgeRecord,
+      operation: "bridge.jobs.result",
+      signedAt: input.signedAt,
+      signature: input.signature,
+      payload: {
+        resultId: input.resultId,
+        jobId: input.jobId,
+        deviceId: input.deviceId,
+        nonce: input.nonce,
+        status: input.status,
+        outputRef: input.outputRef ?? null,
+        error: input.error ?? null,
+        reportedAt: input.reportedAt
+      },
+      now: new Date(input.reportedAt)
+    });
+    if (!signatureCheck.ok) {
+      return { ok: false, reason: signatureCheck.reason };
     }
 
     const dedupe = await insertExecutionJobResult(this.env.APP_DB, {
