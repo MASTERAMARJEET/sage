@@ -12,7 +12,7 @@
     "d1:migrate:remote": "wrangler d1 migrations apply sage-brain-db --remote"
   },
   "dependencies": {
-    "agents": "^0.0.98",
+    "agents": "^0.3.10",
     "zod": "^4.1.11"
   },
   "devDependencies": {
