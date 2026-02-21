@@ -1,0 +1,60 @@
+---
+description: Standards for creating Pull Requests using gh cli with specific structure
+globs: 
+---
+# Pull Request Creation Standards
+
+When the user asks to create a Pull Request (PR), you must follow this standard structure for the PR title and body. Use the `gh` CLI tool via the `Shell` tool to create the PR.
+
+## 1. Title Format
+Use the format: `Type: Short Description`
+Examples:
+- `Feature: Organization-Specific Call Rates`
+- `Bugfix: Fix scheduling delay calculation`
+- `Refactor: Update Google Cloud client initialization`
+
+## 2. Body Structure
+The body MUST use the following markdown template. Ensure you fill in the sections based on the actual changes (use `git status`, `git diff`, and `git log` to analyze changes first).
+
+```markdown
+## Description
+[A comprehensive high-level summary of what this PR achieves. Explain the "why" and the "what".]
+
+## Technical Description
+[Detailed breakdown of technical changes, grouped by component or area. Use bullet points.]
+
+### [Area/Component Name]
+- **[Specific Change]:** [Details]
+- **[Specific Change]:** [Details]
+
+## Related Issue
+[Issue number linked, e.g., #123, or "NA"]
+
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Refactor
+- [ ] Documentation update
+- [ ] Other: [Description]
+
+## Breaking Changes
+[Explain any breaking changes or state "None". If there are breaking changes, explain how to mitigate them.]
+
+## Testing
+[List the tests added or run to verify the changes.]
+- [ ] [Test description, e.g., "Added unit tests for X"]
+- [ ] [Test description, e.g., "Verified admin interface manually"]
+```
+
+## 3. Command Execution
+Use the `gh pr create` command with a HEREDOC for the body to ensure proper formatting.
+
+Example:
+```bash
+gh pr create --title "Type: Title" --body "$(cat <<'EOF'
+## Description
+...
+EOF
+)"
+```

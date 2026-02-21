@@ -1,0 +1,52 @@
+---
+alwaysApply: false
+description: pr-review-gh
+---
+
+### PR Review Helper — use `gh` for PR details
+
+Use GitHub CLI (`gh`) to fetch pull request metadata, diffs, files, and reviews non-interactively. Prefer JSON output piped to `jq` for robust parsing.
+
+- **Identify PR context**
+
+  - Current branch to PR: `gh pr view --json number,title,headRefName,baseRefName,author,state,mergeable`
+  - Specific PR by number: `gh pr view <PR_NUMBER> --json number,title,author,headRefName,baseRefName,state,mergeable`
+  - From URL: `gh pr view <PR_URL> --json number,title,author`
+
+- **Fetch details (JSON-first)**
+
+  - Summary JSON: `gh pr view <PR_NUMBER> --json number,title,body,author,createdAt,updatedAt,mergeStateStatus,mergeable,labels,milestone,assignees,reviewRequests`
+  - Commits: `gh pr view <PR_NUMBER> --json commits | jq -r '.commits[] | "\(.oid) \(.messageHeadline)"'`
+  - Changed files: `gh pr view <PR_NUMBER> --json files | jq -r '.files[] | .path'`
+  - Reviews: `gh pr view <PR_NUMBER> --json reviews | jq -r '.reviews[] | "\(.author.login): \(.state)"'`
+
+- **Diffs and patches**
+
+  - Unified diff: `gh pr diff <PR_NUMBER>`
+  - Name-only: `gh pr diff <PR_NUMBER> --name-only`
+  - Stat: `gh pr diff <PR_NUMBER> --stat`
+
+- **Check status and CI**
+
+  - Status checks: `gh pr view <PR_NUMBER> --json statusCheckRollup | jq -r '.statusCheckRollup[] | "\(.name): \(.conclusion // .status)"'`
+  - Mergeability: `gh pr view <PR_NUMBER> --json mergeable,mergeStateStatus`
+
+- **Non-interactive defaults**
+
+  - Always add `--repo <OWNER/REPO>` when outside repo or ambiguous.
+  - Avoid prompts: all commands above are non-interactive.
+
+- **Environment & auth**
+
+  - Requires GitHub CLI installed and authenticated: `gh auth status`.
+  - If running in CI, ensure `GH_TOKEN`/`GITHUB_TOKEN` is set.
+
+- **Good `jq` snippets**
+
+  - Title and link: `gh pr view <N> --json title,number,url | jq -r '"[#\(.number)] \(.title) — \(.url)"'`
+  - Files with additions/deletions: `gh pr view <N> --json files | jq -r '.files[] | "\(.path) +\(.additions) -\(.deletions)"'`
+
+- **Safety**
+  - Read-only: only `gh pr view`/`gh pr diff` used. Do not use merge/close without explicit instruction.
+
+For comprehensive repository PR review guidance, see the separate rule: [pr-review.md](mdc:pr-review.md) if present.
