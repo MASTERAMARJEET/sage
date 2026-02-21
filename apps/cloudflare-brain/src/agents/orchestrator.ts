@@ -10,8 +10,10 @@ import {
 import { runChatViaAiGateway } from "../lib/ai-gateway";
 import { ensureSqlSchema, insertAuditEvent, insertSessionMessage } from "../lib/db";
 import {
+  evaluateDispatchAuthorization,
   ensureBridgeRegistered,
   evaluateTrustTierAuthorization,
+  isBridgeOnline,
   isReplayNonceAllowed,
   validateApprovalResolutionState
 } from "../lib/guardrails";
@@ -19,6 +21,7 @@ import { evaluateToolIntentPolicy } from "../lib/policy";
 import type { AppEnv } from "../types/env";
 import {
   approvalResolutionSchema,
+  dispatchAuthorizationRequestSchema,
   bridgeHeartbeatSchema,
   bridgeRegistrationSchema,
   deviceTrustTierSchema,
@@ -57,6 +60,22 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     if (request.method === "POST" && url.pathname.endsWith("/tool-intent")) {
       const input = (await request.json()) as ToolIntent;
       const result = await this.submitToolIntent(input);
+      return Response.json(result);
+    }
+
+    if (request.method === "POST" && url.pathname.endsWith("/tool-intent/authorize-dispatch")) {
+      const input = await request.json();
+      const parsed = dispatchAuthorizationRequestSchema.safeParse(input);
+      if (!parsed.success) {
+        return Response.json(
+          {
+            authorized: false,
+            reason: "Invalid dispatch authorization payload"
+          },
+          { status: 400 }
+        );
+      }
+      const result = await this.authorizeDispatch(parsed.data);
       return Response.json(result);
     }
 
@@ -463,6 +482,82 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
     });
 
     return { ok: true };
+  }
+
+  private async authorizeDispatch(input: {
+    intent: ToolIntent;
+    approvalId?: string;
+    requestedAt: string;
+  }): Promise<{ authorized: boolean; reason?: string; deviceId?: string }> {
+    const bridge = await this.env.APP_KV.get(`bridge:${input.intent.actorDeviceId}`, "json");
+    const bridgeCheck = ensureBridgeRegistered(bridge);
+    if (!bridgeCheck.ok) {
+      return { authorized: false, reason: bridgeCheck.reason };
+    }
+
+    const bridgeRecord = bridge as Record<string, unknown>;
+    const trustTier = deviceTrustTierSchema.safeParse(bridgeRecord.trustTier);
+    if (!trustTier.success) {
+      return { authorized: false, reason: "Bridge trust tier is missing or invalid" };
+    }
+
+    const trustDecision = evaluateTrustTierAuthorization({
+      trustTier: trustTier.data,
+      action: input.intent.action
+    });
+    if (!trustDecision.allowed) {
+      return { authorized: false, reason: trustDecision.reason };
+    }
+
+    const policyDecision = evaluateToolIntentPolicy(input.intent);
+    let approvalStatus: string | undefined;
+
+    if (policyDecision.requiresApproval) {
+      if (!input.approvalId) {
+        return { authorized: false, reason: "Approval ID required for this action" };
+      }
+
+      const approval = await this.env.APP_KV.get(`approval:${input.approvalId}`, "json");
+      if (!approval || typeof approval !== "object") {
+        return { authorized: false, reason: "Approval request not found or expired" };
+      }
+
+      const pending = approval as Record<string, unknown>;
+      if (pending.intentId !== input.intent.id) {
+        return { authorized: false, reason: "Approval does not match intent" };
+      }
+      approvalStatus = typeof pending.status === "string" ? pending.status : undefined;
+    }
+
+    const online = isBridgeOnline({
+      lastSeenAt:
+        typeof bridgeRecord.lastSeenAt === "string" ? bridgeRecord.lastSeenAt : "1970-01-01T00:00:00.000Z",
+      now: new Date(input.requestedAt)
+    });
+
+    const dispatchDecision = evaluateDispatchAuthorization({
+      requiresApproval: policyDecision.requiresApproval,
+      approvalStatus,
+      bridgeOnline: online
+    });
+    if (!dispatchDecision.allowed) {
+      return { authorized: false, reason: dispatchDecision.reason };
+    }
+
+    await this.persistAudit(
+      input.intent.sessionId,
+      "execution_dispatched",
+      {
+        intentId: input.intent.id,
+        deviceId: input.intent.actorDeviceId
+      },
+      input.intent.id
+    );
+
+    return {
+      authorized: true,
+      deviceId: input.intent.actorDeviceId
+    };
   }
 
   private deriveTrustTier(attestation: string): "trusted" | "restricted" | "quarantined" {

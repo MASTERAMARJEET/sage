@@ -18,6 +18,7 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 
 - `POST /agents/sage-agent/:instance/message`
 - `POST /agents/sage-agent/:instance/tool-intent`
+- `POST /agents/sage-agent/:instance/tool-intent/authorize-dispatch`
 - `POST /agents/sage-agent/:instance/approval/resolve`
 - `POST /agents/sage-agent/:instance/bridge/register`
 - `POST /agents/sage-agent/:instance/bridge/heartbeat`
@@ -33,6 +34,10 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
   - `trusted`: full action surface, then policy gating
   - `restricted`: blocks `exec`, `publish`, and `delete`
   - `quarantined`: only allows `read`, `list`, `status`
+- Dispatch authorization requires:
+  - active bridge heartbeat (online check)
+  - approval status `approved` for actions that require approval
+  - matching approval to intent ID
 
 ## Bridge trust tiers
 

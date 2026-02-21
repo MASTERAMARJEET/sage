@@ -67,6 +67,13 @@ export const bridgeHeartbeatSchema = z.object({
 });
 export type BridgeHeartbeat = z.infer<typeof bridgeHeartbeatSchema>;
 
+export const dispatchAuthorizationRequestSchema = z.object({
+  intent: toolIntentSchema,
+  approvalId: z.string().min(1).optional(),
+  requestedAt: z.string().datetime()
+});
+export type DispatchAuthorizationRequest = z.infer<typeof dispatchAuthorizationRequestSchema>;
+
 export const executionReceiptSchema = z.object({
   id: z.string().min(1),
   intentId: z.string().min(1),
