@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { stableStringify } from "../../../bridge-core/src/crypto";
 import {
   ensureBridgeRegistered,
   evaluateDispatchAuthorization,
@@ -147,11 +148,11 @@ describe("bridge signature verification", () => {
 
     const signedAt = "2026-02-21T00:00:00.000Z";
     const payload = {
-      deviceId: "device-1",
+      sentAt: "2026-02-21T00:00:00.000Z",
       nonce: "nonce-12345678",
-      sentAt: "2026-02-21T00:00:00.000Z"
+      deviceId: "device-1"
     };
-    const message = `${"bridge.heartbeat"}\n${signedAt}\n${JSON.stringify(payload)}`;
+    const message = buildBridgeMessageForTest("bridge.heartbeat", signedAt, payload);
     const signatureBuffer = await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
       keyPair.privateKey,
@@ -173,6 +174,45 @@ describe("bridge signature verification", () => {
 
     expect(result.ok).toBe(true);
   });
+
+  it("rejects a tampered payload with an otherwise valid signature", async () => {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"]
+    );
+
+    const signedAt = "2026-02-21T00:00:00.000Z";
+    const signedPayload = {
+      deviceId: "device-1",
+      nonce: "nonce-12345678",
+      sentAt: "2026-02-21T00:00:00.000Z"
+    };
+    const signatureBuffer = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      keyPair.privateKey,
+      new TextEncoder().encode(buildBridgeMessageForTest("bridge.heartbeat", signedAt, signedPayload))
+    );
+    const publicKeyBuffer = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+
+    const tamperedPayload = {
+      ...signedPayload,
+      sentAt: "2026-02-21T00:01:00.000Z"
+    };
+    const result = await verifyBridgeRequestSignature({
+      mode: "required",
+      bridgeRecord: {
+        publicKey: toBase64(new Uint8Array(publicKeyBuffer))
+      },
+      operation: "bridge.heartbeat",
+      signedAt,
+      signature: toBase64(new Uint8Array(signatureBuffer)),
+      payload: tamperedPayload,
+      now: new Date("2026-02-21T00:00:10.000Z")
+    });
+
+    expect(result.ok).toBe(false);
+  });
 });
 
 function toBase64(bytes: Uint8Array): string {
@@ -181,4 +221,12 @@ function toBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function buildBridgeMessageForTest(
+  operation: string,
+  signedAt: string,
+  payload: Record<string, unknown>
+): string {
+  return `${operation}\n${signedAt}\n${stableStringify(payload)}`;
 }

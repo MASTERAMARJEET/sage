@@ -55,3 +55,30 @@ export function insertAuditEvent(
     VALUES (${args.id}, ${args.sessionId}, ${args.kind}, ${args.payloadJson}, ${args.correlationId}, ${args.createdAt})
   `;
 }
+
+export function listAuditEvents(
+  agent: SqlCapable,
+  args: { sessionId: string; limit: number }
+): Array<{
+  id: string;
+  session_id: string;
+  kind: string;
+  payload_json: string;
+  correlation_id: string;
+  created_at: string;
+}> {
+  return agent.sql<{
+    id: string;
+    session_id: string;
+    kind: string;
+    payload_json: string;
+    correlation_id: string;
+    created_at: string;
+  }>`
+    SELECT id, session_id, kind, payload_json, correlation_id, created_at
+    FROM audit_events
+    WHERE session_id = ${args.sessionId}
+    ORDER BY created_at DESC
+    LIMIT ${args.limit}
+  `;
+}

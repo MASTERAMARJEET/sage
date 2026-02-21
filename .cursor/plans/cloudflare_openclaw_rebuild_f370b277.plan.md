@@ -13,10 +13,10 @@ todos:
     status: completed
   - id: build-bridges
     content: Build Mac and Android bridge executors with device trust tiers and scoped local file access.
-    status: in_progress
+    status: completed
   - id: ship-phase1-flow
     content: "Deliver end-to-end Phase-1 workflow: request -> policy -> approval -> local execution -> audited result."
-    status: in_progress
+    status: completed
   - id: ai-gateway-baseline
     content: Configure AI Gateway as mandatory LLM egress with model routing, retries/fallback, and per-session observability.
     status: completed

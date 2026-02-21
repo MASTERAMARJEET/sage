@@ -1,6 +1,15 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { signBridgeRequest, toBase64 } from "../../bridge-core/src/crypto";
+import { createBridgeTransport } from "../../bridge-core/src/transport";
+import type {
+  BridgeHeartbeatRequest,
+  BridgeJobPullRequest,
+  BridgeJobResultRequest,
+  BridgePullJob,
+  BridgeRegistrationRequest
+} from "../../bridge-core/src/protocol";
 
 type BridgeConfig = {
   brainBaseUrl: string;
@@ -18,30 +27,26 @@ type BridgeState = {
   privateKeyPkcs8Base64: string;
   publicKeySpkiBase64: string;
 };
-
-type PullJob = {
-  jobId: string;
-  intentId: string;
-  payload: {
-    action: string;
-    args: Record<string, unknown>;
-  };
-};
+type BridgeTransport = ReturnType<typeof createBridgeTransport>;
 
 async function main(): Promise<void> {
   const config = loadConfig();
   await ensureParentDir(config.stateFile);
   const keys = await loadOrCreateBridgeState(config.stateFile);
+  const transport = createBridgeTransport({
+    brainBaseUrl: config.brainBaseUrl,
+    instance: config.instance
+  });
 
-  await registerBridge(config, keys.publicKeySpkiBase64);
+  await registerBridge(transport, config, keys.publicKeySpkiBase64);
   console.log(`[sage-mac-bridge] Registered device ${config.deviceId}`);
 
   for (;;) {
     try {
-      await sendHeartbeat(config, keys.privateKeyPkcs8Base64);
-      const jobs = await pullJobs(config, keys.privateKeyPkcs8Base64, config.maxJobsPerCycle);
+      await sendHeartbeat(transport, config, keys.privateKeyPkcs8Base64);
+      const jobs = await pullJobs(transport, config, keys.privateKeyPkcs8Base64, config.maxJobsPerCycle);
       for (const job of jobs) {
-        await handleJob(config, keys.privateKeyPkcs8Base64, job);
+        await handleJob(transport, config, keys.privateKeyPkcs8Base64, job);
       }
     } catch (error) {
       console.error("[sage-mac-bridge] loop error", error);
@@ -111,9 +116,13 @@ async function createBridgeState(): Promise<BridgeState> {
   };
 }
 
-async function registerBridge(config: BridgeConfig, publicKey: string): Promise<void> {
+async function registerBridge(
+  transport: BridgeTransport,
+  config: BridgeConfig,
+  publicKey: string
+): Promise<void> {
   const requestedAt = new Date().toISOString();
-  const body = {
+  const body: BridgeRegistrationRequest = {
     deviceId: config.deviceId,
     platform: "macos",
     publicKey,
@@ -121,13 +130,17 @@ async function registerBridge(config: BridgeConfig, publicKey: string): Promise<
     nonce: crypto.randomUUID(),
     requestedAt
   };
-  const response = await postJson(config, "/bridge/register", body);
+  const response = await transport.postJson("/bridge/register", body);
   if (!response.ok) {
     throw new Error(`bridge register failed: ${JSON.stringify(response)}`);
   }
 }
 
-async function sendHeartbeat(config: BridgeConfig, privateKeyBase64: string): Promise<void> {
+async function sendHeartbeat(
+  transport: BridgeTransport,
+  config: BridgeConfig,
+  privateKeyBase64: string
+): Promise<void> {
   const sentAt = new Date().toISOString();
   const nonce = crypto.randomUUID();
   const signedAt = new Date().toISOString();
@@ -137,21 +150,23 @@ async function sendHeartbeat(config: BridgeConfig, privateKeyBase64: string): Pr
     sentAt
   };
   const signature = await signBridgeRequest(privateKeyBase64, "bridge.heartbeat", signedAt, payload);
-  const response = await postJson(config, "/bridge/heartbeat", {
+  const body: BridgeHeartbeatRequest = {
     ...payload,
     signedAt,
     signature
-  });
+  };
+  const response = await transport.postJson("/bridge/heartbeat", body);
   if (!response.ok) {
     throw new Error(`bridge heartbeat failed: ${JSON.stringify(response)}`);
   }
 }
 
 async function pullJobs(
+  transport: BridgeTransport,
   config: BridgeConfig,
   privateKeyBase64: string,
   limit: number
-): Promise<PullJob[]> {
+): Promise<BridgePullJob[]> {
   const requestedAt = new Date().toISOString();
   const nonce = crypto.randomUUID();
   const signedAt = new Date().toISOString();
@@ -162,18 +177,24 @@ async function pullJobs(
     limit
   };
   const signature = await signBridgeRequest(privateKeyBase64, "bridge.jobs.pull", signedAt, payload);
-  const response = await postJson(config, "/bridge/jobs/pull", {
+  const body: BridgeJobPullRequest = {
     ...payload,
     signedAt,
     signature
-  });
+  };
+  const response = await transport.postJson("/bridge/jobs/pull", body);
   if (!response.ok) {
     throw new Error(`bridge jobs pull failed: ${JSON.stringify(response)}`);
   }
-  return Array.isArray(response.jobs) ? (response.jobs as PullJob[]) : [];
+  return Array.isArray(response.jobs) ? (response.jobs as BridgePullJob[]) : [];
 }
 
-async function handleJob(config: BridgeConfig, privateKeyBase64: string, job: PullJob): Promise<void> {
+async function handleJob(
+  transport: BridgeTransport,
+  config: BridgeConfig,
+  privateKeyBase64: string,
+  job: BridgePullJob
+): Promise<void> {
   let status: "completed" | "failed" | "rejected" = "completed";
   let outputRef: string | undefined;
   let error: string | undefined;
@@ -210,13 +231,14 @@ async function handleJob(config: BridgeConfig, privateKeyBase64: string, job: Pu
     signaturePayload
   );
 
-  const response = await postJson(config, "/bridge/jobs/result", {
+  const body: BridgeJobResultRequest = {
     ...signaturePayload,
     outputRef,
     error,
     signedAt,
     signature
-  });
+  };
+  const response = await transport.postJson("/bridge/jobs/result", body);
   if (!response.ok) {
     throw new Error(`bridge jobs result failed: ${JSON.stringify(response)}`);
   }
@@ -270,64 +292,6 @@ function assertPathAllowed(allowedRoots: string[], targetPath: string): void {
   }
 }
 
-async function signBridgeRequest(
-  privateKeyBase64: string,
-  operation: string,
-  signedAt: string,
-  payload: Record<string, unknown>
-): Promise<string> {
-  const privateKey = await crypto.subtle.importKey(
-    "pkcs8",
-    fromBase64(privateKeyBase64),
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-  const message = `${operation}\n${signedAt}\n${stableStringify(payload)}`;
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(message)
-  );
-  return toBase64(new Uint8Array(signature));
-}
-
-function stableStringify(value: unknown): string {
-  return JSON.stringify(sortJsonValue(value));
-}
-
-function sortJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => sortJsonValue(entry));
-  }
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(obj).sort()) {
-      sorted[key] = sortJsonValue(obj[key]);
-    }
-    return sorted;
-  }
-  return value;
-}
-
-async function postJson(
-  config: BridgeConfig,
-  suffix: string,
-  body: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  const url = `${config.brainBaseUrl}/agents/sage-agent/${encodeURIComponent(config.instance)}${suffix}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-  const json = (await response.json()) as Record<string, unknown>;
-  return json;
-}
-
 function expectStringArg(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== "string" || value.length === 0) {
@@ -346,17 +310,6 @@ function requireEnv(name: string): string {
 
 function encodeInlineJson(payload: Record<string, unknown>): string {
   return `inline:base64json:${toBase64(new TextEncoder().encode(JSON.stringify(payload)))}`;
-}
-
-function fromBase64(value: string): ArrayBuffer {
-  const decoded = Buffer.from(value, "base64");
-  const out = new ArrayBuffer(decoded.length);
-  new Uint8Array(out).set(decoded);
-  return out;
-}
-
-function toBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
 }
 
 async function ensureParentDir(filePath: string): Promise<void> {

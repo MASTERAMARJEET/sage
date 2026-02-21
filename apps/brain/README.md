@@ -39,6 +39,7 @@ This includes job controls, maintenance cleanup, queue metrics, and job detail r
 - `POST /agents/sage-agent/:instance/jobs/:jobId/requeue`
 - `POST /agents/sage-agent/:instance/maintenance/cleanup`
 - `GET /agents/sage-agent/:instance/sessions/:sessionId/jobs?limit=20`
+- `GET /agents/sage-agent/:instance/sessions/:sessionId/audit?limit=50`
 - `GET /agents/sage-agent/:instance/devices/:deviceId/jobs?limit=20`
 - `GET /agents/sage-agent/:instance/approvals/pending?limit=20&sessionId=<id>`
 - `GET /agents/sage-agent/:instance/metrics/queue?deviceId=<id>`
@@ -91,8 +92,23 @@ This includes job controls, maintenance cleanup, queue metrics, and job detail r
 4. Run tests:
    - `npm run test`
 
+## Phase-1 flow walkthrough
+
+The current scaffold supports an end-to-end guarded flow:
+
+1. Submit intent: `POST /tool-intent`
+2. If required, resolve approval: `POST /approval/resolve`
+3. Authorize dispatch and queue job: `POST /tool-intent/authorize-dispatch`
+4. Bridge pulls queued work: `POST /bridge/jobs/pull`
+5. Bridge executes locally and submits receipt: `POST /bridge/jobs/result`
+6. Inspect queue status and final result:
+   - `GET /jobs/:jobId`
+   - `GET /sessions/:sessionId/jobs`
+   - `GET /sessions/:sessionId/audit`
+
+All privileged transitions emit audit events to both Durable Object SQLite and R2.
+
 ## Notes
 
-- This is intentionally a Stage 0/1 foundation and does not yet include full policy/approval workflow execution.
-- LLM requests are designed to route through AI Gateway from day one.
+- LLM requests route through AI Gateway from day one.
 - Companion bridge scaffolds live at `apps/mac-bridge` and `apps/android-bridge`.

@@ -22,7 +22,7 @@ import {
   upsertDeviceRecord
 } from "../lib/app-db";
 import { runChatViaAiGateway } from "../lib/ai-gateway";
-import { ensureSqlSchema, insertAuditEvent, insertSessionMessage } from "../lib/db";
+import { ensureSqlSchema, insertAuditEvent, insertSessionMessage, listAuditEvents } from "../lib/db";
 import {
   evaluateDispatchAuthorization,
   ensureBridgeRegistered,
@@ -345,6 +345,34 @@ export class SageAgent extends Agent<AppEnv, SageAgentState> {
       return Response.json({
         ok: true,
         jobs: jobs.map((job) => this.serializeJobRow(job))
+      });
+    }
+
+    const sessionAuditMatch = path.match(/\/sessions\/([^/]+)\/audit$/);
+    if (sessionAuditMatch) {
+      if (!(await this.isOperatorAuthorized(request))) {
+        return Response.json({ ok: false, reason: "Unauthorized" }, { status: 401 });
+      }
+      const sessionId = decodeURIComponent(sessionAuditMatch[1]);
+      const limit = Math.min(Number.parseInt(searchParams.get("limit") ?? "50", 10) || 50, 200);
+      const events = listAuditEvents(this, { sessionId, limit });
+      return Response.json({
+        ok: true,
+        events: events.map((event) => ({
+          id: event.id,
+          sessionId: event.session_id,
+          kind: event.kind,
+          payload:
+            (() => {
+              try {
+                return JSON.parse(event.payload_json);
+              } catch {
+                return { raw: event.payload_json };
+              }
+            })(),
+          correlationId: event.correlation_id,
+          createdAt: event.created_at
+        }))
       });
     }
 
