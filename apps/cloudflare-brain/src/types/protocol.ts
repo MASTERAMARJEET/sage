@@ -35,6 +35,15 @@ export const approvalRequestSchema = z.object({
 });
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
+export const approvalResolutionSchema = z.object({
+  approvalId: z.string().min(1),
+  approved: z.boolean(),
+  reason: z.string().optional(),
+  resolvedBy: z.string().min(1),
+  resolvedAt: z.string().datetime()
+});
+export type ApprovalResolution = z.infer<typeof approvalResolutionSchema>;
+
 export const executionReceiptSchema = z.object({
   id: z.string().min(1),
   intentId: z.string().min(1),

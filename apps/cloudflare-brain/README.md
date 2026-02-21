@@ -18,7 +18,14 @@ Cloudflare-native control plane for an OpenClaw-inspired personal agent system.
 
 - `POST /agents/sage-agent/:instance/message`
 - `POST /agents/sage-agent/:instance/tool-intent`
+- `POST /agents/sage-agent/:instance/approval/resolve`
 - `GET /agents/sage-agent/:instance/state`
+
+## Current policy baseline
+
+- Deny-by-default for unknown actions
+- Auto-allow low-risk actions (`read`, `list`, `status`)
+- Require approval for high-risk actions (`write`, `delete`, `exec`, `publish`)
 
 ## Local development
 
