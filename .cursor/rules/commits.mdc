@@ -1,0 +1,58 @@
+---
+description: How to write commit messages and name branches
+alwaysApply: false
+---
+
+# Commit Message Conventions
+
+Follow these patterns when making commits in this repo.
+
+## Subject line format
+
+Prefer one of these (in order of preference when applicable):
+
+1. **With type prefix**: `Type: Short description`  
+   Examples:  
+   - `fix: :bug: Infrastructure Scaling Configuration`  
+   - `feat: :sparkles: Update Swiggy Call Rate and Add Webhook Error Handling`  
+   - `hotfix: :ambulance: Fix missing docs templates`
+   - `feat: :sparkles: OM-6090, OM-5890: Custom variables in result prompt and current_time system variable`
+
+
+## Type prefixes
+
+| Type     | Use for                          |
+|----------|-----------------------------------|
+| fix      | Bug fixes, incorrect behavior     |
+| feat     | New features, enhancements        |
+| hotfix   | Urgent production fixes          |
+
+## Subject rules
+
+- One line, ideally under ~72 characters.
+- Imperative mood: "add X", "fix Y", "update Z" (not "added", "fixes", "updated").
+- lowercase for non-keyword works
+- No period at the end of the subject.
+
+## Body (optional)
+
+- Separate from subject with a blank line.
+- Use bullet points for multiple changes.
+
+## Examples
+
+```
+feat: :sparkles: allow custom variables in result prompt and current_time system variable
+```
+
+```
+fix: :bug: infrastructure scaling configuration
+```
+
+```
+feat: :sparkles: update fallback mechanism in swiggy metadata api
+```
+
+```
+fix: :bug: call details admin page not loading
+```

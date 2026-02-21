@@ -1,0 +1,42 @@
+---
+alwaysApply: true
+description: Guidelines for adding logging statements in code
+---
+
+# Logging Guidelines
+
+When adding logging to code, follow these strict guidelines:
+
+## When to Add Logs
+- **Only add logs in places where it is absolutely necessary**
+- **Critical error points** that could cause system failure or data corruption
+- **Security-related events** (failed authentications, unauthorized access attempts)
+- **Business-critical operations** (payment processing, data migrations)
+- **External API failures** or connectivity issues
+
+## Logging Levels
+- **ERROR**: Use for exceptions, system failures, or critical issues that need immediate attention
+- **WARNING**: Use for potentially harmful situations or important events that are not errors
+- **INFO**: Use sparingly and only for significant state changes or operations
+- **DEBUG**: Generally avoid in production code unless absolutely necessary for troubleshooting
+
+## When in Doubt
+- **Ask the user to confirm** before adding any logging
+- **Consider if the log provides real value** or is just noise
+- **Think about log volume** - excessive logging can impact performance and make debugging harder
+
+## Examples
+
+### Good uses of logging:
+- Database connection failures (ERROR)
+- Failed API authentication (WARNING)
+- Payment transaction failures (ERROR)
+- System startup/shutdown events (INFO, rarely)
+
+### Avoid unnecessary logging:
+- Routine function entry/exit
+- Successful API calls
+- Normal business flow operations
+- Debug information that clutters logs
+
+Always err on the side of caution - it's easier to add logs later than remove excessive ones.
